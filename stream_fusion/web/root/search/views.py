@@ -1,7 +1,7 @@
 import hashlib
 import time
 from fastapi import APIRouter, Depends, HTTPException, Request
-
+import asyncio
 
 from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
 from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
@@ -37,12 +37,14 @@ from stream_fusion.utils.torrent.torrent_smart_container import TorrentSmartCont
 from stream_fusion.utils.zilean.zilean_result import ZileanResult
 from stream_fusion.utils.zilean.zilean_service import ZileanService
 from stream_fusion.settings import settings
+from stream_fusion.utils.debrid.stremthrudebrid import StremThruDebrid
+from concurrent.futures import ThreadPoolExecutor
 
 
 router = APIRouter()
 
 
-@router.get("/{config}/stream/{stream_type}/{stream_id}", response_model=SearchResponse)
+@router.get("/{config}/stream/{stream_type}/{stream_id:path}", response_model=SearchResponse)
 async def get_results(
     request: Request,
     config: str,
@@ -288,25 +290,72 @@ async def get_results(
     search_results = ResultsPerQualityFilter(config).filter(raw_search_results)
     logger.info(f"Search: Filtered search results per quality: {len(search_results)}")
 
-    def stream_processing(search_results, media, config):
+    async def stream_processing(search_results, media, config) -> list[dict]:
         torrent_smart_container = TorrentSmartContainer(search_results, media)
 
-        if config["debrid"]:
-            for debrid in debrid_services:
-                hashes = torrent_smart_container.get_unaviable_hashes()
-                ip = request.client.host
-                result = debrid.get_availability_bulk(hashes, ip)
+        tasks = []
+
+        for service in debrid_services: 
+            service_name = service.__class__.__name__
+            logger.debug(f"Processing service: {service_name}")
+
+            # Check if StremThruDebrid is the service instance
+            if isinstance(service, StremThruDebrid):
+                logger.debug(f"Creating StremThru task for {service_name}.get_cached_files_async")
+                # StremThru uses get_cached_files_async with all items
+                task = asyncio.create_task(service.get_cached_files_async(torrent_smart_container.get_items()))
+                tasks.append((service_name, task, service))
+            else: 
+                # Direct services use get_availability_bulk with unavailable hashes
+                hashes_to_check = torrent_smart_container.get_unaviable_hashes()
+                if not hashes_to_check:
+                    logger.debug(f"No unavailable hashes to check with direct service {service_name}. Skipping.")
+                    continue 
+                logger.debug(f"Creating Direct Debrid task for {service_name}.get_availability_bulk with {len(hashes_to_check)} hashes")
+                # Pass unavailable hashes and media context
+                task = asyncio.create_task(service.get_availability_bulk(hashes_to_check, media))
+                tasks.append((service_name, task, service)) 
+
+        # Gather results from all tasks (StremThru or Direct)
+        if not tasks:
+            logger.debug("No availability check tasks were created.")
+            results = []
+        else:
+            results = await asyncio.gather(*[task for _, task, _ in tasks])
+            logger.debug(f"Gathered {len(results)} results from availability checks.")
+
+        for i, (service_name, _, service_instance) in enumerate(tasks): 
+            result = results[i]
+            logger.debug(f"Processing result from {service_name} (instance type: {type(service_instance).__name__})")
+
+            if isinstance(service_instance, StremThruDebrid):
                 if result:
-                    torrent_smart_container.update_availability(
-                        result, type(debrid), media
-                    )
-                    logger.info(
-                        f"Search: Checked availability for {len(result.items())} items with {type(debrid).__name__}"
-                    )
+                    result_dict, used_store_name = result
+                    if result_dict:
+                        logger.debug(f"Updating availability from StremThru store '{used_store_name}'")
+                        torrent_smart_container.update_availability_stremthru(cached_files=result_dict, store_name=used_store_name, media=media)
+                    else:
+                        logger.info(f"No cached files found by StremThru for store '{used_store_name}'.")
                 else:
-                    logger.warning(
-                        "Search: No availability results found in debrid service"
-                    )
+                    logger.warning(f"Invalid or empty result received from StremThru {service_name}.")
+            elif isinstance(result, dict):
+                logger.debug(f"Updating availability from direct service {service_name}")
+                torrent_smart_container.update_availability(debrid_response=result, debrid_type=type(service_instance), media=media)
+            else:
+                logger.warning(f"Received unexpected result type ({type(result)}) from {service_name}. Skipping update.")
+
+        logger.debug("--- Entering Availability Check Block ---")
+        logger.debug("--- Container Items Availability Check (After Updates) ---")
+        container_items = torrent_smart_container.get_items()
+        if container_items:
+            for i, item in enumerate(container_items[:5]):
+                filename_log = item.file_name[:60] if item.file_name else "[No Filename]"
+                logger.debug(f"Item {i} Hash: {item.info_hash}, Filename: {filename_log}..., Availability: {item.availability}")
+            if len(container_items) > 5:
+                logger.debug(f"... (logged first 5 out of {len(container_items)} items)")
+        else:
+            logger.debug("Container is empty after updates.")
+        logger.debug("--- End Availability Check ---")
 
         if config["cache"]:
             logger.info("Search: Caching public container items")
@@ -322,7 +371,7 @@ async def get_results(
 
         return stream_list
 
-    stream_list = stream_processing(search_results, media, config)
+    stream_list = await stream_processing(search_results, media, config)
     streams = [Stream(**stream) for stream in stream_list]
     await redis_cache.set(stream_cache_key(media), streams, expiration=1200)
     total_time = time.time() - start
