@@ -3,6 +3,7 @@ import json
 from urllib.parse import unquote
 import redis.asyncio as redis
 import asyncio
+import time
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from redis.exceptions import LockError
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -21,6 +22,7 @@ from stream_fusion.utils.debrid.get_debrid_service import (
 )
 from stream_fusion.utils.debrid.realdebrid import RealDebrid
 from stream_fusion.utils.debrid.torbox import Torbox
+from stream_fusion.utils.debrid.stremthrudebrid import StremThruDebrid
 from stream_fusion.utils.parse_config import parse_config
 from stream_fusion.utils.string_encoding import decodeb64
 from stream_fusion.utils.security import check_api_key
@@ -91,36 +93,45 @@ class ProxyStreamer:
         logger.debug("Playback: Streaming connection closed")
 
 
-# class ProxyStreamer:
-#     def __init__(self, request: Request, url: str, headers: dict):
-#         self.request = request
-#         self.url = url
-#         self.headers = headers
-#         self.response = None
-
-#     async def stream_content(self):
-#         async with self.request.app.state.http_session.get(
-#             self.url, headers=self.headers
-#         ) as self.response:
-#             async for chunk in self.response.content.iter_any():
-#                 yield chunk
-
-#     async def close(self):
-#         if self.response:
-#             await self.response.release()
-#         logger.debug("Streaming connection closed")
-
-
 async def handle_download(
     query: dict, config: dict, ip: str, redis_cache: RedisCache
 ) -> str:
     api_key = config.get("apiKey")
-    cache_key = f"download:{api_key}:{json.dumps(query)}_{ip}"
+    cache_key_params = {k: query[k] for k in sorted(query.keys())} 
+    cache_key = f"download:{api_key}:{json.dumps(cache_key_params)}_{ip}"
 
     # Check if a download is already in progress
     if await redis_cache.get(cache_key) == DOWNLOAD_IN_PROGRESS_FLAG:
         logger.info("Playback: Download already in progress")
         return settings.no_cache_video_url
+
+    # Determine the actual download service (could be StremThru even for 'DL' request)
+    download_service = get_download_service(config)
+
+    # If StremThru is the configured download handler
+    if isinstance(download_service, StremThruDebrid):
+        logger.info("Playback (handle_download): StremThru service detected as download handler. Attempting direct stream link retrieval.")
+        # Ensure store_code present for StremThruDebrid
+        if not query.get('store_code'):
+            default_service = config.get('debridDownloader')
+            inv = {v: k for k, v in StremThruDebrid.STORE_CODE_TO_NAME.items()}
+            code = inv.get(default_service.lower()) if default_service else None
+            if code:
+                logger.debug(f"Playback: inferred store_code '{code}' for StremThruDebrid based on debridDownloader '{default_service}'")
+                query['store_code'] = code
+            else:
+                logger.warning(f"Playback: cannot infer store_code for StremThruDebrid from config.debridDownloader '{default_service}'")
+        try:
+            direct_link = await download_service.get_stream_link(query, config, ip)
+            if direct_link:
+                logger.success(f"Playback (handle_download): StremThru provided direct link: {direct_link[:60]}...")
+                # Return the direct link immediately, skip Redis flag and status page
+                return direct_link
+            else:
+                logger.warning("Playback (handle_download): StremThru did not provide an immediate link. Proceeding with background process indication.")
+        except Exception as e:
+            logger.error(f"Playback (handle_download): Error getting StremThru link: {e}. Proceeding with background process indication.")
+            # Fall through to the standard download status logic
 
     # Mark the start of the download
     await redis_cache.set(
@@ -163,39 +174,44 @@ async def handle_download(
                     status_code=500,
                     detail="Failed to add magnet or torrent to TorBox",
                 )
+        elif isinstance(debrid_service, StremThruDebrid):
+            # StremThru handles caching/downloading via its get_stream_link/add_magnet logic.
+            # No explicit background caching call needed here.
+            logger.info("Playback: StremThru service detected. Skipping explicit background caching call.")
+            pass # Nothing to do here for StremThru in this specific block
         else:
-            magnet = query["magnet"]
-            torrent_download = (
-                unquote(query["torrent_download"])
-                if query["torrent_download"] is not None
-                else None
-            )
             try:
-                # Start background caching
-                if debrid_service.start_background_caching(magnet, query):
-                    logger.success(
-                        f"Playback: Started background caching for magnet: {magnet[:50]}"
-                    )
+                # Check if the service supports background caching before attempting to call it
+                if hasattr(debrid_service, 'start_background_caching'):
+                    if debrid_service.start_background_caching(query):
+                        logger.success(
+                            f"Playback: Started background caching for magnet: {query['magnet'][:50]}"
+                        )
+                    else:
+                        # If the method exists but returns False, it failed
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Failed to start background caching (service returned false)"
+                        )
                 else:
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Failed to start background caching"
-                    )
+                    # Log a warning if the service doesn't support this method
+                    logger.warning(f"Playback: Service {type(debrid_service).__name__} does not support start_background_caching. Skipping.")
+                    # Since caching isn't started/needed, clear the progress flag immediately.
+                    await redis_cache.delete(cache_key)
             except Exception as e:
                 logger.error(f"Error starting background caching: {str(e)}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to start background caching: {str(e)}"
-                )
+                # Ensure the flag is deleted on any exception during the caching attempt
+                await redis_cache.delete(cache_key)
         return settings.no_cache_video_url
     except Exception as e:
+        # Ensure the flag is deleted on any other exception within handle_download
         await redis_cache.delete(cache_key)
         logger.error(f"Playback: Error handling download: {str(e)}", exc_info=True)
         raise e
 
 
 async def get_stream_link(
-    decoded_query: str, config: dict, ip: str, redis_cache: RedisCache, cache_user_identifier: str
+    decoded_query: str, config: dict, ip: str, redis_cache: RedisCache, cache_user_identifier: str, request: Request
 ) -> str:
     logger.debug(f"Playback: Getting stream link for query: {decoded_query}, IP: {ip}")
     cache_key = f"stream_link:{cache_user_identifier}:{decoded_query}"
@@ -213,8 +229,10 @@ async def get_stream_link(
     if service == "DL":
         link = await handle_download(query, config, ip, redis_cache)
     elif service:
-        debrid_service = get_debrid_service(config, service)
-        link = debrid_service.get_stream_link(query, config, ip)
+        debrid_service = get_debrid_service(config, service, request)
+        logger.info(f"Playback: Attempting get_stream_link for service '{type(debrid_service).__name__}' and query {decoded_query}...")
+        link = await debrid_service.get_stream_link(query, config, ip)
+        logger.info(f"Playback: Service '{type(debrid_service).__name__}' returned link: {link}")
     else:
         logger.error("Playback: Service not found in query")
         raise HTTPException(status_code=500, detail="Service not found in query")
@@ -226,6 +244,154 @@ async def get_stream_link(
     else:
         logger.debug("Playback: Stream link not cached (NO_CACHE_VIDEO_URL)")
     return link
+
+
+# Nouvelle route pour le playback via Stremthru
+@router.get("/stremthru/{store_code}/{config}/{query}")
+@rate_limiter(limit=settings.playback_limit_requests, seconds=settings.playback_limit_seconds)
+async def get_stremthru_playback(
+    store_code: str,
+    config: str,
+    query: str,
+    request: Request,
+    redis_cache: RedisCache = Depends(get_redis_cache_dependency),
+    apikey_dao: APIKeyDAO = Depends(),
+):
+    start_time = time.time()
+    ip = request.client.host
+    logger.info(f"Playback GET Stremthru/{store_code}: Request received from {ip}")
+
+    try:
+        config_dict = parse_config(config)
+        api_key = config_dict.get("apiKey")
+        cache_user_identifier = api_key if api_key else ip
+
+        # Valider la clé API si elle existe
+        if api_key:
+            try:
+                await check_api_key(api_key, apikey_dao)
+                logger.info(f"Playback GET Stremthru/{store_code}: Valid API key provided by {ip}")
+            except HTTPException as e:
+                logger.warning(f"Playback GET Stremthru/{store_code}: Invalid API key provided by {ip}. Error: {e.detail}")
+                raise e
+        else:
+            logger.info(f"Playback GET Stremthru/{store_code}: No API key provided by {ip}. Proceeding without validation.")
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query required.")
+
+        decoded_query = decodeb64(query)
+        query_dict = json.loads(decoded_query)
+
+        # Récupérer l'instance StremThruDebrid
+        # Assurez-vous que StremThruDebrid peut être initialisé correctement avec config_dict
+        # et qu'il utilise le bon store_name basé sur la config ou store_code?
+        # Pour l'instant, supposons que l'instance StremThru est le gestionnaire principal.
+        try:
+            stremthru_service = StremThruDebrid(config_dict) 
+            # TODO: Vérifier si StremThruDebrid utilise bien le store_code implicitement
+            # ou s'il faut le passer/configurer spécifiquement.
+            # Il lit `store_name` et `store_auth` de config_dict, donc la config URL doit les contenir.
+        except Exception as e:
+            logger.error(f"Playback GET Stremthru/{store_code}: Failed to initialize StremThruDebrid: {e}")
+            raise HTTPException(status_code=500, detail="Failed to initialize Stremthru service")
+
+        logger.info(f"Playback GET Stremthru/{store_code}: Attempting to get stream link via Stremthru service.")
+        logger.debug(f"Playback GET Stremthru/{store_code}: Query details: {query_dict}")
+
+        # Add store_code to query_dict before passing it
+        query_dict['store_code'] = store_code
+
+        # Appeler get_stream_link qui gère tout le processus (add, wait, unrestrict)
+        # Elle prend query (dict), config (dict), ip (str)
+        stream_link = await stremthru_service.get_stream_link(query=query_dict, config=config_dict, ip=ip)
+
+        if not stream_link:
+            logger.error(f"Playback GET Stremthru/{store_code}: Failed to get stream link from Stremthru service.")
+            raise HTTPException(status_code=502, detail="Failed to get stream link from Stremthru service")
+
+        logger.info(f"Playback GET Stremthru/{store_code}: Stream link obtained: {stream_link[:60]}...")
+
+        # Rediriger ou Proxy
+        if settings.proxied_link:
+            logger.info(f"Playback GET Stremthru/{store_code}: Proxying stream from {stream_link[:60]}...")
+            headers = {key: value for key, value in request.headers.items() if key.lower() in ["range", "accept"]}
+            streamer = ProxyStreamer(request, stream_link, headers)
+            return StreamingResponse(
+                streamer.stream_content(),
+                headers={"Accept-Ranges": "bytes", "Content-Range": request.headers.get("range", "bytes 0-")},
+                background=BackgroundTask(streamer.close),
+            )
+        else:
+            logger.info(f"Playback GET Stremthru/{store_code}: Redirecting to {stream_link[:60]}...")
+            return RedirectResponse(url=stream_link, status_code=302)
+
+    except HTTPException: # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Playback GET Stremthru/{store_code}: Unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error during Stremthru playback: {e}")
+    finally:
+        end_time = time.time()
+        logger.info(f"Playback GET Stremthru/{store_code}: Request processing time: {end_time - start_time:.2f} seconds")
+
+# Nouvelle route HEAD pour Stremthru
+@router.head("/stremthru/{store_code}/{config}/{query}")
+async def head_stremthru_playback(
+    store_code: str,
+    config: str,
+    query: str,
+    request: Request,
+    apikey_dao: APIKeyDAO = Depends(), # Ajouter dépendances nécessaires
+):
+    ip = request.client.host
+    logger.info(f"Playback HEAD Stremthru/{store_code}: Request received from {ip}")
+
+    try:
+        config_dict = parse_config(config)
+        api_key = config_dict.get("apiKey")
+
+        # Valider la clé API si elle existe
+        if api_key:
+            try:
+                await check_api_key(api_key, apikey_dao)
+                logger.info(f"Playback HEAD Stremthru/{store_code}: Valid API key provided by {ip}")
+            except HTTPException as e:
+                logger.warning(f"Playback HEAD Stremthru/{store_code}: Invalid API key provided by {ip}. Error: {e.detail}")
+                raise e
+        else:
+            logger.info(f"Playback HEAD Stremthru/{store_code}: No API key provided by {ip}. Proceeding without validation.")
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query required.")
+        
+        # La logique HEAD est simple: renvoyer OK avec les bons en-têtes.
+        # On ne vérifie PAS le lien distant ici pour Stremthru pour l'instant.
+        # Le client (Stremio) fera la requête GET si le HEAD réussit.
+        headers = {
+            "Content-Type": "video/mp4",
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Content-Length": "0" # Indiquer une taille 0 car on ne connaît pas la vraie taille
+        }
+        logger.info(f"Playback HEAD Stremthru/{store_code}: Returning 200 OK for HEAD request.")
+        return Response(status_code=status.HTTP_200_OK, headers=headers)
+
+    except HTTPException: # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Playback HEAD Stremthru/{store_code}: Unexpected error: {e}", exc_info=True)
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ErrorResponse(
+                detail="An error occurred while processing the HEAD request."
+            ).model_dump_json(),
+            media_type="application/json",
+        )
 
 
 @router.get("/{config}/{query}", responses={500: {"model": ErrorResponse}})
@@ -277,8 +443,8 @@ async def get_playback(
         try:
             if await lock.acquire(blocking=False):
                 logger.debug("Playback: Lock acquired, getting stream link")
-                # Pass cache_user_identifier to get_stream_link
-                link = await get_stream_link(decoded_query, config, ip, redis_cache, cache_user_identifier)
+                # Pass cache_user_identifier and request to get_stream_link
+                link = await get_stream_link(decoded_query, config, ip, redis_cache, cache_user_identifier, request)
             else:
                 logger.debug("Playback: Lock not acquired, waiting for cached link")
                 # Use cache_user_identifier for cache key lookup
