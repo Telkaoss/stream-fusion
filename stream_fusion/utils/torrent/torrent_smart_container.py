@@ -26,14 +26,11 @@ class TorrentSmartContainer:
         self.__media = media
 
     def get_unaviable_hashes(self):
-        hashes = []
-        for hash, item in self.__itemsDict.items():
-            if item.availability is False:
-                hashes.append(hash)
-        self.logger.debug(
-            f"TorrentSmartContainer: Retrieved {len(hashes)} hashes to process"
-        )
-        return hashes
+        return [item.info_hash for item in self.get_items() if item.availability == ""]
+
+    def get_unavailable_magnets(self):
+        """Retourne les liens magnet pour les items qui n'ont pas encore de disponibilité marquée."""
+        return [item.magnet for item in self.get_items() if item.availability == "" and item.magnet]
 
     def get_items(self):
         items = list(self.__itemsDict.values())
@@ -261,21 +258,22 @@ class TorrentSmartContainer:
         for data in response["data"]["magnets"]:
             torrent_item: TorrentItem = self.__itemsDict[data["hash"]]
             
-            # Set availability to AD immediately for all files
-            torrent_item.availability = "AD"
-            
-            # Process files if they exist
+            # Only mark AD availability if we have files from AllDebrid
             if "files" in data and data["files"]:
                 files = []
                 self._explore_folders_alldebrid(
                     data["files"], files, 1, torrent_item.type, media
                 )
-                if files:  # If we found matching files
+                if files:
                     self._update_file_details(torrent_item, files, debrid="AD")
+                else:
+                    self.logger.debug(
+                        f"No matching AD files for hash {data['hash']}; skipping availability update."
+                    )
             else:
-                # If no files data, still mark as available
-                self.logger.debug(f"No files data for hash {data['hash']}, but marking as available")
-                torrent_item.availability = "AD"
+                self.logger.debug(
+                    f"No files data for hash {data['hash']}; skipping AD availability update."
+                )
                 
         self.logger.info(
             "TorrentSmartContainer: AllDebrid availability update completed"
@@ -410,8 +408,100 @@ class TorrentSmartContainer:
                     )
 
         self.logger.info(
-            "TorrentSmartContainer: Premiumize availability update completed"
+            f"TorrentSmartContainer: Premiumize availability update completed. {len([item for item in torrent_items if item.availability == 'PM'])}/{len(torrent_items)} items marked as instant."
         )
+
+    def update_availability_stremthru(self, cached_files, store_name, media):
+        """
+        Met à jour la disponibilité des items basée sur les fichiers retournés par StremThru (via get_cached_files).
+        'cached_files' est maintenant un dictionnaire {info_hash: [file_dict, ...], ...}
+        'store_name' est le nom du store interne StremThru (ex: 'alldebrid', 'realdebrid').
+        """
+        if not cached_files or not isinstance(cached_files, dict):
+            self.logger.debug(f"update_availability_stremthru: No cached files provided or not a dict: {type(cached_files)}")
+            return
+
+        # --- MODIFICATION: Calculer le nombre total de fichiers pour le log --- 
+        total_files_count = sum(len(files) for files in cached_files.values())
+        self.logger.info(f"TorrentSmartContainer: Updating availability from Stremthru cached files dict for store '{store_name}' ({len(cached_files)} hashes, {total_files_count} files total)")
+
+        # --- MODIFICATION: Revenir à la logique précédente pour générer le code --- 
+        # Déterminer le code de disponibilité basé sur le store StremThru
+        # store_availability_code = config.get_stremthru_availability_code(store_name) # Utilise une méthode de config
+        # Générer le code court pour la disponibilité (comme avant)
+        availability_code = store_name[:2].upper() if store_name else "ST" # Utiliser 'ST' si store_name est None/vide
+        if store_name == "alldebrid": availability_code = "AD"
+        elif store_name == "easydebrid": availability_code = "ED"
+        elif store_name == "realdebrid": availability_code = "RD"
+        elif store_name == "premiumize": availability_code = "PM"
+        elif store_name == "debridlink": availability_code = "DL"
+        elif store_name == "pikpak": availability_code = "PK"
+        elif store_name == "offcloud": availability_code = "OC"
+        elif store_name == "torbox": availability_code = "TB"
+        # Ajouter d'autres si besoin
+
+        # IMPORTANT: Préfixer le code pour indiquer la gestion par Stremthru
+        stremthru_availability_code = f"ST:{availability_code}"
+
+        self.logger.info(f"Using availability code '{stremthru_availability_code}' for store '{store_name}' from Stremthru cached files.")
+
+        # Log the raw data received from StremThru
+        self.logger.debug(f"TorrentSmartContainer: Received raw cached_files data from Stremthru for store '{store_name}': {cached_files}")
+
+        updated_hashes = set() # Garder trace des hashes uniques mis à jour
+        updated_hashes_count = 0
+        skipped_non_matching = 0
+
+        # --- MODIFICATION: Itérer sur les valeurs (listes de fichiers), puis les fichiers --- 
+        for info_hash_key, files_list in cached_files.items(): # Itérer sur les paires clé(hash)/valeur(liste de fichiers)
+            item = self.__itemsDict.get(info_hash_key) # Récupérer l'item TorrentItem correspondant au hash
+            if not item:
+                # Ce cas ne devrait pas arriver si get_cached_files a bien utilisé les hashes du container
+                self.logger.warning(f"update_availability_stremthru: Infohash {info_hash_key} from StremThru response not found in container.")
+                continue
+
+            # Marquer que ce hash a été mis à jour (au moins un fichier trouvé)
+            if info_hash_key not in updated_hashes:
+                updated_hashes_count += 1
+                updated_hashes.add(info_hash_key)
+
+            # Traiter chaque fichier trouvé pour ce hash
+            for file_info in files_list: # Maintenant, file_info est bien un dictionnaire
+                # Validation basique de file_info (pourrait être renforcée)
+                if not isinstance(file_info, dict):
+                    self.logger.warning(f"update_availability_stremthru: Expected dict for file_info, got {type(file_info)} for hash {info_hash_key}. Skipping this file.")
+                    continue
+
+                # info_hash = file_info.get("info_hash") # On a déjà info_hash_key
+                file_index = file_info.get("file_index")
+                file_title = file_info.get("title")
+                file_size = file_info.get("size")
+
+                # Skip invalid or unknown indices (e.g., None or -1)
+                if file_index is None or file_index < 0:
+                    self.logger.debug(
+                        f"update_availability_stremthru: Skipping file '{file_title}' for hash {info_hash_key} due to invalid file_index {file_index}."
+                    )
+                    skipped_non_matching += 1
+                    continue
+                # Update first valid file_info using base method (use availability_code without ST: prefix)
+                if item:
+                    self._update_file_details(
+                        item,
+                        [{'file_index': file_index, 'title': file_title, 'size': file_size}],
+                        debrid=f"ST:{availability_code}"
+                    )
+                    self.logger.debug(
+                        f"StremThru: Updated file details for hash {info_hash_key}, file_index {file_index}, title '{file_title}', availability '{availability_code}'"
+                    )
+                    # Only use the first matching file
+                    break
+                # Count skips due to missing file_index
+                if file_index is None:
+                    skipped_non_matching += 1
+
+        # Log final
+        self.logger.info(f"TorrentSmartContainer: Availability update from Stremthru completed. {updated_hashes_count} items potentially updated. Skipped {skipped_non_matching} files due to missing index.")
 
     def _update_file_details(self, torrent_item, files, debrid: str = "??"):
         if not files:
