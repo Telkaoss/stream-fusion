@@ -187,11 +187,21 @@ class RedisCache(CacheBase):
         await self.execute_with_retry(set_operation)
 
     async def delete(self, key: str) -> bool:
+        # Skip delete if Redis not available
+        if not await self.can_cache():
+            self.logger.debug(f"RedisCache.delete: cache indisponible, suppression ignorée pour {key}")
+            return False
+
         async def delete_operation():
             client = await self.get_redis_client()
             return bool(await client.delete(key))
 
-        return await self.execute_with_retry(delete_operation)
+        try:
+            return await self.execute_with_retry(delete_operation)
+        except Exception as e:
+            # Log at debug to avoid polluting logs when deletion fails
+            self.logger.debug(f"RedisCache.delete: suppression impossible pour {key}: {e}")
+            return False
 
     async def exists(self, key: str) -> bool:
         async def exists_operation():
