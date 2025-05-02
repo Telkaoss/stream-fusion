@@ -2,6 +2,7 @@ import json
 import queue
 import re
 import threading
+import json
 from typing import List
 
 from RTN import ParsedData
@@ -71,10 +72,30 @@ def parse_to_debrid_stream(
     results: queue.Queue,
     media: Media,
 ):
-    if torrent_item.availability:
-        name = f"{INSTANTLY_AVAILABLE}|–{torrent_item.availability}-|{INSTANTLY_AVAILABLE}"
+    # Determine if AllDebrid cache is available (direct or via StremThru)
+    avail = torrent_item.availability
+    is_ad_cached = False
+    if isinstance(avail, dict):
+        # check codes like 'ST:AD' in dict values
+        for code in avail.values():
+            if 'AD' in code:
+                is_ad_cached = True
+                break
+    elif isinstance(avail, str) and 'AD' in avail:
+        is_ad_cached = True
+    # Determine display name: show only service code when cached
+    if is_ad_cached:
+        # extract code from availability value
+        if isinstance(avail, dict):
+            first = next(iter(avail.values()), None)
+            code = first if isinstance(first, str) else None
+        else:
+            code = avail if isinstance(avail, str) else None
+        code = code or "AD"
+        name = f"{INSTANTLY_AVAILABLE}{code}+"
     else:
-        name = f"{DOWNLOAD_REQUIRED}|–DL-|{DOWNLOAD_REQUIRED}"
+        # show file title when not cached
+        name = torrent_item.file_name or torrent_item.raw_title
 
     parsed_data: ParsedData = torrent_item.parsed_data
 
@@ -120,21 +141,19 @@ def parse_to_debrid_stream(
         json.dumps(torrent_item.to_debrid_stream_query(media))
     ).replace("=", "%3D")
 
-    results.put(
-        {
-            "name": name,
-            "description": title,
-            "url": f"{host}/playback/{configb64}/{queryb64}",
-            "behaviorHints": {
-                "bingeGroup": f"stremio-jackett-{torrent_item.info_hash}",
-                "filename": (
-                    torrent_item.file_name
-                    if torrent_item.file_name is not None
-                    else torrent_item.raw_title
-                ),
-            },
+    results.put({
+        "name": name,
+        "description": title,
+        "url": f"{host}/playback/{configb64}/{queryb64}",
+        "behaviorHints": {
+            "bingeGroup": f"stremio-jackett-{torrent_item.info_hash}",
+            "filename": (
+                torrent_item.file_name
+                if torrent_item.file_name is not None
+                else torrent_item.raw_title
+            ),
         }
-    )
+    })
 
     if torrenting and torrent_item.privacy == "public":
         name = f"{DIRECT_TORRENT}\n{parsed_data.quality}\n"
