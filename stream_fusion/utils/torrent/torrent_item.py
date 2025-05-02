@@ -29,7 +29,9 @@ class TorrentItem:
         self.trackers = []  # Trackers of the torrent
         self.file_index = None  # Index of the file inside of the torrent - it may be updated durring __process_torrent() and update_availability(). If the index is None and torrent is not None, it means that the series episode is not inside of the torrent.
         self.full_index = None  # Case where we cannot call RD to get the full index. Else None
-        self.availability = False  # If it's instantly available on the debrid service
+        
+        # Initialize availability as an empty string to match get_unaviable_hashes check
+        self.availability = ""  # Stores service codes (e.g., 'AD', 'RD') or remains empty until checked
 
         self.parsed_data: ParsedData = parsed_data  # Ranked result
 
@@ -41,6 +43,7 @@ class TorrentItem:
             "season": media.season if isinstance(media, Series) else None,
             "episode": media.episode if isinstance(media, Series) else None,
             "torrent_download": quote(self.torrent_download) if self.torrent_download is not None else None,
+            # Utiliser la chaîne de disponibilité complète comme code de service
             "service": self.availability if self.availability else "DL",
             "privacy": self.privacy if self.privacy else "private",
         }
