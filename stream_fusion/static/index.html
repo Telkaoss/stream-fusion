@@ -70,12 +70,26 @@
                                 <input id="debrid_rd" name="debrid_rd" type="checkbox"
                                     data-unique-account="{{ rd_unique_account|lower }}"
                                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                    onchange="updateProviderFields(true)">
+                                    onchange="updateProviderFields()">
                             </div>
                             <div class="text-sm leading-6">
                                 <label for="debrid_rd" class="font-medium text-white">Enable Real-Debrid Service</label>
                                 <p class="text-gray-500 dark:text-gray-300">Activate Real-Débrid service for streaming.
                                 </p>
+                            </div>
+                            <!-- RealDebrid Token Info -->
+                            <div id="rd_token_info_div" class="mt-4 space-y-3" style="display: none;">
+                                <p class="text-sm text-gray-400">Real-Debrid nécessite une authentification OAuth.</p>
+                                <button type="button" id="rd-auth-button" onclick="startRealDebridAuth()"
+                                    class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 transition ease-in-out duration-150">
+                                    S'authentifier avec Real-Debrid
+                                </button>
+                                <div id="auth-instructions" style="display: none;" class="text-sm text-gray-300">
+                                    <p>Veuillez visiter <a id="verification-url" href="#" target="_blank"
+                                            class="font-medium text-indigo-400 hover:text-indigo-300">l'URL de vérification</a>
+                                        et entrer le code: <strong id="user-code" class="text-white"></strong></p>
+                                </div>
+                                <input type="hidden" id="rd_token_info" name="rd_token_info">
                             </div>
                         </div>
 
@@ -84,12 +98,26 @@
                                 <input id="debrid_ad" name="debrid_ad" type="checkbox"
                                     data-unique-account="{{ ad_unique_account|lower }}"
                                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                    onchange="updateProviderFields(true)">
+                                    onchange="updateProviderFields()">
                             </div>
                             <div class="text-sm leading-6">
                                 <label for="debrid_ad" class="font-medium text-white">Enable AllDebrid Service</label>
                                 <p class="text-gray-500 dark:text-gray-300">Activate AllDebrid service for streaming.
                                 </p>
+                            </div>
+                            <!-- AllDebrid Token Info -->
+                            <div id="ad_token_info_div" class="mt-4 space-y-3" style="display: none;">
+                                <p class="text-sm text-gray-400">AllDebrid nécessite une authentification OAuth.</p>
+                                <button type="button" id="ad-auth-button" onclick="startADAuth()"
+                                    class="rounded-md bg-orange-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-orange-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 transition ease-in-out duration-150">
+                                    Connect with AllDebrid
+                                </button>
+                                <div id="ad-auth-instructions" style="display: none;" class="text-sm text-gray-300">
+                                    <p>Please visit <a id="ad-verification-url" href="#" target="_blank"
+                                            class="font-medium text-orange-400 hover:text-orange-300">verification URL</a>
+                                        and enter the code: <strong id="ad-user-code" class="text-white"></strong></p>
+                                </div>
+                                <input type="hidden" id="ad_token_info" name="ad_token_info">
                             </div>
                         </div>
 
@@ -98,11 +126,21 @@
                                 <input id="debrid_pm" name="debrid_pm" type="checkbox"
                                     data-unique-account="{{ pm_unique_account|lower }}"
                                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                    onchange="updateProviderFields(true)">
+                                    onchange="updateProviderFields()">
                             </div>
                             <div class="text-sm leading-6">
                                 <label for="debrid_pm" class="font-medium text-white">Enable Premiumize Service</label>
                                 <p class="text-gray-500 dark:text-gray-300">Activate Premiumize service for streaming.</p>
+                            </div>
+                            <!-- Premiumize Token Info -->
+                            <div id="pm_token_info_div" class="mt-2" style="display: none;">
+                                <label for="pm_token_info" class="block text-sm font-medium leading-6 text-white">Premiumize
+                                    API Key</label>
+                                <input type="text" name="pm_token_info" id="pm_token_info"
+                                    placeholder="Votre clé API Premiumize"
+                                    class="mt-1 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6">
+                                <p class="mt-1 text-xs text-gray-400">Trouvez votre clé API dans les paramètres de votre compte
+                                    Premiumize.</p>
                             </div>
                         </div>
 
@@ -111,13 +149,93 @@
                                 <input id="debrid_tb" name="debrid_tb" type="checkbox"
                                     data-unique-account="{{ tb_unique_account|lower }}"
                                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                    onchange="updateProviderFields(true)">
+                                    onchange="updateProviderFields()">
                             </div>
                             <div class="text-sm leading-6">
                                 <label for="debrid_tb" class="font-medium text-white">Enable TorBox Service</label>
                                 <p class="text-gray-500 dark:text-gray-300">Activate TorBox service for streaming.
                                 </p>
                             </div>
+                            <!-- TorBox Token Info -->
+                            <div id="tb_token_info_div" class="mt-2" style="display: none;">
+                                <label for="tb_token_info" class="block text-sm font-medium leading-6 text-white">TorBox API
+                                    Key</label>
+                                <input type="text" name="tb_token_info" id="tb_token_info" placeholder="Votre clé API TorBox"
+                                    class="mt-1 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6">
+                                <p class="mt-1 text-xs text-gray-400">Disponible dans les paramètres de votre compte TorBox.</p>
+                            </div>
+                        </div>
+
+                        <div class="relative flex gap-x-3">
+                            <div class="flex h-6 items-center">
+                                <input id="debrid_dl" name="debrid_dl" type="checkbox"
+                                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                    onchange="updateProviderFields()">
+                            </div>
+                            <div class="text-sm leading-6">
+                                <label for="debrid_dl" class="font-medium text-white">Enable Debrid-Link Service</label>
+                                <p class="text-gray-500 dark:text-gray-300">Activate Debrid-Link service for streaming.</p>
+                            </div>
+                        </div>
+                        <div id="debridlink_api_key_div" class="mt-2 hidden">
+                            <label for="debridlink_api_key" class="block text-sm font-medium leading-6 text-white">Debrid-Link API Key</label>
+                            <input type="text" name="debridlink_api_key" id="debridlink_api_key"
+                                   class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                   placeholder="Enter your Debrid-Link API Key">
+                        </div>
+
+                        <div class="relative flex gap-x-3">
+                            <div class="flex h-6 items-center">
+                                <input id="debrid_ed" name="debrid_ed" type="checkbox"
+                                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                    onchange="updateProviderFields()">
+                            </div>
+                            <div class="text-sm leading-6">
+                                <label for="debrid_ed" class="font-medium text-white">Enable EasyDebrid Service</label>
+                                <p class="text-gray-500 dark:text-gray-300">Activate EasyDebrid service for streaming.</p>
+                            </div>
+                        </div>
+                        <div id="easydebrid_api_key_div" class="mt-2 hidden">
+                            <label for="easydebrid_api_key" class="block text-sm font-medium leading-6 text-white">EasyDebrid API Key</label>
+                            <input type="text" name="easydebrid_api_key" id="easydebrid_api_key"
+                                   class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                   placeholder="Enter your EasyDebrid API Key">
+                        </div>
+
+                        <div class="relative flex gap-x-3">
+                            <div class="flex h-6 items-center">
+                                <input id="debrid_oc" name="debrid_oc" type="checkbox"
+                                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                    onchange="updateProviderFields()">
+                            </div>
+                            <div class="text-sm leading-6">
+                                <label for="debrid_oc" class="font-medium text-white">Enable Offcloud Service</label>
+                                <p class="text-gray-500 dark:text-gray-300">Activate Offcloud service for streaming.</p>
+                            </div>
+                        </div>
+                        <div id="offcloud_credentials_div" class="mt-2 hidden">
+                            <label for="offcloud_credentials" class="block text-sm font-medium leading-6 text-white">Offcloud Credentials (email:password)</label>
+                            <input type="text" name="offcloud_credentials" id="offcloud_credentials"
+                                   class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                   placeholder="Enter your Offcloud email:password">
+                        </div>
+
+                        <div class="relative flex gap-x-3">
+                            <div class="flex h-6 items-center">
+                                <input id="debrid_pk" name="debrid_pk" type="checkbox"
+                                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                    onchange="updateProviderFields()">
+                            </div>
+                            <div class="text-sm leading-6">
+                                <label for="debrid_pk" class="font-medium text-white">Enable PikPak Service</label>
+                                <p class="text-gray-500 dark:text-gray-300">Activate PikPak service for streaming.</p>
+                            </div>
+                        </div>
+                        <div id="pikpak_credentials_div" class="mt-2 hidden">
+                            <label for="pikpak_credentials" class="block text-sm font-medium leading-6 text-white">PikPak Credentials (email:password)</label>
+                            <input type="text" name="pikpak_credentials" id="pikpak_credentials"
+                                   class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                   placeholder="Enter your PikPak email:password">
                         </div>
 
                         <div class="relative flex gap-x-3">
@@ -126,12 +244,49 @@
                                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
                             </div>
                             <div class="text-sm leading-6">
-                                <label for="torrenting" class="font-medium text-white">Enable Torrenting</label>
-                                <p class="text-gray-500 dark:text-gray-300"><span
-                                        class="font-bold text-red-600 dark:text-red-500">Warning: This may be illegal in
+                                <label for="torrenting" class="font-medium text-white">Enable Torrenting <span
+                                        class="text-red-500">(Risky)</span></label>
+                                <p class="text-gray-500 dark:text-gray-300">Activate direct torrent streaming. <span
+                                        class="text-red-500">This may be illegal in
                                         some countries. Use at your own risk.</span></p>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- StremThru Section -->
+                <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
+                    <div class="flex flex-col items-center">
+                        <h2 class="text-white font-semibold leading-7">StremThru Settings</h2>
+                        <p class="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-400">Configure StremThru as an optional interface.</p>
+                    </div>
+                    <div class="mt-10 space-y-10">
+                        <!-- Enable StremThru Checkbox -->
+                        <div class="relative flex gap-x-3">
+                            <div class="flex h-6 items-center">
+                                <input id="stremthru_enabled" name="stremthru_enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600" onchange="toggleStremThruFields()">
+                            </div>
+                            <div class="text-sm leading-6">
+                                <label for="stremthru_enabled" class="font-medium text-white">Enable StremThru</label>
+                                <p class="text-gray-500 dark:text-gray-300">Use StremThru to manage debrid services.</p>
+                            </div>
+                        </div>
+                        <!-- StremThru URL Input -->
+                        <div id="stremthru_url_div" class="hidden"> 
+                             <label for="stremthru_url" class="block text-sm font-medium leading-6 text-white">StremThru URL</label>
+                             <input type="text" name="stremthru_url" id="stremthru_url"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                    placeholder="https://stremthru.13377001.xyz/">
+                             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Enter the URL of your StremThru instance.</p>
+                        </div>
+                         <!-- StremThru Store Auth Input -->
+                         <div id="stremthru_auth_div" class="hidden"> 
+                              <label for="stremthru_store_auth" class="block text-sm font-medium leading-6 text-white">StremThru Store Authorization (Optional)</label>
+                              <input type="text" name="stremthru_store_auth" id="stremthru_store_auth"
+                                     class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                     placeholder="Optional global auth key">
+                              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Global key if required by your StremThru instance.</p>
+                         </div>
                     </div>
                 </div>
 
@@ -161,7 +316,7 @@
                             <div class="flex h-6 items-center">
                                 <input id="cache" name="cache" type="checkbox" checked
                                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                    onchange="updateProviderFields(true)">
+                                    onchange="updateProviderFields()">
                             </div>
                             <div class="text-sm leading-6">
                                 <label for="cache" class="font-medium text-white">Enable Public Caching</label>
@@ -191,7 +346,7 @@
                                 <input id="yggflix" name="yggflix" type="checkbox"
                                     data-unique-account="{{ ygg_unique_account|lower }}"
                                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                    onchange="updateProviderFields(true)">
+                                    onchange="updateProviderFields()">
                             </div>
                             <div class="text-sm leading-6">
                                 <label for="yggflix" class="font-medium text-white">Enable YggTorrent API</label>
@@ -205,7 +360,7 @@
                                 <input id="sharewood" name="sharewood" type="checkbox"
                                     data-unique-account="{{ sharewood_unique_account|lower }}"
                                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                    onchange="updateProviderFields(true)">
+                                    onchange="updateProviderFields()">
                             </div>
                             <div class="text-sm leading-6">
                                 <label for="sharewood" class="font-medium text-white">Enable Sharewood API</label>
@@ -754,14 +909,13 @@
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="mt-6 flex items-center justify-center gap-x-6">
-                <a id="install" onclick="return getLink('link')"
-                    class="cursor-pointer rounded-md bg-black px-3 py-2 text-sm font-semibold text-white dark:text-black dark:bg-white shadow-sm hover:bg--500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Install</a>
-                <a id="copy" onclick="return getLink('copy')"
-                    class="cursor-pointer rounded-md bg-black px-3 py-2 text-sm font-semibold text-white dark:text-black dark:bg-white shadow-sm hover:bg--500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Copy</a>
-            </div>
+                <div class="mt-6 flex items-center justify-center gap-x-6">
+                    <a id="install" onclick="return getLink('link')"
+                        class="cursor-pointer rounded-md bg-black px-3 py-2 text-sm font-semibold text-white dark:text-black dark:bg-white shadow-sm hover:bg--500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Install</a>
+                    <a id="copy" onclick="return getLink('copy')"
+                        class="cursor-pointer rounded-md bg-black px-3 py-2 text-sm font-semibold text-white dark:text-black dark:bg-white shadow-sm hover:bg--500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Copy</a>
+                </div>
     </div>
     </form>
     </div>
