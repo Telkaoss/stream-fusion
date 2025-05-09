@@ -51,7 +51,17 @@
                                         <label for="ApiKey" class="block text-sm font-medium leading-6 text-red-600 text-center">API Key</label>
                                         <input type="text" name="ApiKey" id="ApiKey"
                                             class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6">
+                                        <div id="apiKeyError" class="hidden mt-2 text-sm text-center text-red-600">
+                                            <p>API Key manquante ou invalide</p>
+                                        </div>
                                     </div>
+                                </div>
+                                <div class="mt-4 text-center">
+                                    <p class="text-sm text-gray-200 bg-gray-800 rounded-lg p-3 shadow-md">
+                                        <span class="font-bold text-white">Comment obtenir votre API Key ?</span><br>
+                                        1. Ajoutez le Bot Telegram : <a href="https://t.me/Stremiofr_bot" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium">t.me/Stremiofr_bot</a><br>
+                                        2. Envoyez la commande <span class="bg-blue-900 text-white px-2 py-1 rounded font-mono">/generate</span>
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -911,9 +921,9 @@
                 </div>
 
                 <div class="mt-6 flex items-center justify-center gap-x-6">
-                    <a id="install" onclick="return getLink('link')"
+                    <a id="install" onclick="return getLink('link');"
                         class="cursor-pointer rounded-md bg-black px-3 py-2 text-sm font-semibold text-white dark:text-black dark:bg-white shadow-sm hover:bg--500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Install</a>
-                    <a id="copy" onclick="return getLink('copy')"
+                    <a id="copy" onclick="return getLink('copy');"
                         class="cursor-pointer rounded-md bg-black px-3 py-2 text-sm font-semibold text-white dark:text-black dark:bg-white shadow-sm hover:bg--500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Copy</a>
                 </div>
     </div>
