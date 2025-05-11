@@ -522,11 +522,13 @@ function updateProviderFields() {
     const cacheChecked = document.getElementById('cache')?.checked;
     const yggflixChecked = document.getElementById('yggflix')?.checked || document.getElementById('yggflix')?.disabled;
     const sharewoodChecked = document.getElementById('sharewood')?.checked || document.getElementById('sharewood')?.disabled;
+    const torboxChecked = document.getElementById('debrid_tb')?.checked || document.getElementById('debrid_tb')?.disabled;
 
     // Afficher/masquer les champs spécifiques
     setElementDisplay('cache-fields', cacheChecked ? 'block' : 'none');
     setElementDisplay('ygg-fields', yggflixChecked ? 'block' : 'none');
     setElementDisplay('sharewood-fields', sharewoodChecked ? 'block' : 'none');
+    setElementDisplay('tb_debrid-fields', torboxChecked ? 'block' : 'none');
 
     // Traiter tous les débrideurs
     allDebrids.forEach(id => {
