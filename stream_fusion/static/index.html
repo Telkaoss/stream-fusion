@@ -681,7 +681,7 @@
                             <legend class="text-sm font-semibold leading-6 text-white">Sorting Options</legend>
                             <div class="mt-6 space-y-6">
                                 <div class="flex items-center gap-x-3">
-                                    <input id="quality" name="sorting" type="radio"
+                                    <input id="quality" name="sorting" type="radio"  checked
                                         class="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-600">
                                     <label for="quality" class="block text-sm font-medium leading-6 text-white">Get the
                                         best
@@ -702,7 +702,7 @@
                                         size ascending</label>
                                 </div>
                                 <div class="flex items-center gap-x-3">
-                                    <input id="qualitythensize" name="sorting" type="radio" checked
+                                    <input id="qualitythensize" name="sorting" type="radio"
                                         class="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-600">
                                     <label for="qualitythensize"
                                         class="block text-sm font-medium leading-6 text-white">Filter
@@ -755,7 +755,7 @@
                                 want to exclude</p>
                             <div class="mt-6 space-y-6">
                                 <div class="flex items-center gap-x-3">
-                                    <input id="2160p" name="2160p" type="checkbox" checked
+                                    <input id="2160p" name="2160p" type="checkbox"
                                         class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
                                     <label for="2160p" class="block text-sm font-medium leading-6 text-white">Exclude
                                         2160p
@@ -776,7 +776,7 @@
                                         resolution</label>
                                 </div>
                                 <div class="flex items-center gap-x-3">
-                                    <input id="480p" name="480p" type="checkbox"
+                                    <input id="480p" name="480p" type="checkbox" checked
                                         class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
                                     <label for="480p" class="block text-sm font-medium leading-6 text-white">Exclude
                                         480p
@@ -855,6 +855,12 @@
                                         <input id="multi" type="checkbox" name="language" value="multi" checked
                                             class="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
                                         <span class="ml-2 text-white">MULTi</span>
+                                    </label>
+                                    <label class="inline-flex items-center">
+                                        <input id="vfq" type="checkbox" name="language" value="vfq"
+                                            class="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                                        <span class="ml-2 text-white">Français québécois (VFQ)</span>
+                                        <span class="ml-2 text-xs text-gray-400">(Juste pour les québécois - VFQ en priorité)</span>
                                     </label>
                                 </div>
                             </div>
