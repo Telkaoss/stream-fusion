@@ -1,11 +1,10 @@
 const sorts = ['quality', 'sizedesc', 'sizeasc', 'qualitythensize'];
 const qualityExclusions = ['2160p', '1080p', '720p', '480p', 'rips', 'cam', 'hevc', 'unknown'];
-const languages = ['en', 'fr', 'multi'];
+const languages = ['en', 'fr', 'multi', 'vfq'];
 
-// Débrideurs implémentés nativement dans Stream Fusion
+
 const implementedDebrids = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix'];
 
-// Débrideurs qui nécessitent StremThru pour fonctionner
 const unimplementedDebrids = ['debrid_dl', 'debrid_ed', 'debrid_oc', 'debrid_pk'];
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -15,15 +14,12 @@ document.addEventListener('DOMContentLoaded', function () {
     updateDebridOrderList();
     toggleStremThruFields();
     
-    // Ajouter un événement blur sur le champ API Key
     const apiKeyInput = document.getElementById('ApiKey');
     if (apiKeyInput) {
         apiKeyInput.addEventListener('blur', function() {
-            // Valider sans alert quand l'utilisateur quitte le champ
             validateApiKeyWithoutAlert(this.value);
         });
         
-        // Vérifier l'API key au chargement si elle a déjà une valeur
         if (apiKeyInput.value && apiKeyInput.value.trim() !== '') {
             validateApiKeyWithoutAlert(apiKeyInput.value);
         }
@@ -202,7 +198,7 @@ function pollForADCredentials(check, pin, expiresIn) {
                 return response.json();
             })
             .then(data => {
-                if (data === null) return; // Skip processing if user hasn't entered PIN yet
+                if (data === null) return;
                 if (data.data && data.data.activated && data.data.apikey) {
                     clearInterval(pollInterval);
                     clearTimeout(timeoutId);
@@ -698,8 +694,8 @@ function loadData() {
         ctg_yggtorrent: true,
         ctg_yggflix: false,
         metadataProvider: 'tmdb',
-        sort: 'qualitythensize',
-        exclusion: ['cam', '2160p'],
+        sort: 'quality',
+        exclusion: ['cam'],
         languages: ['fr', 'multi'],
         debrid_rd: false,
         debrid_ad: false,
