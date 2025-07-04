@@ -36,7 +36,19 @@ class TorrentService:
         try:
             cached_item = await self.torrent_dao.get_torrent_item_by_id(unique_id)
             if cached_item:
-                return cached_item.to_torrent_item()
+                torrent_item = cached_item.to_torrent_item()
+                
+                # Vérifier si c'est un torrent YggFlix mal mis en cache (sans torrent_download)
+                if (indexer == "Yggtorrent - API" and 
+                    (not torrent_item.torrent_download or 
+                     not settings.yggflix_url or 
+                     settings.yggflix_url not in torrent_item.torrent_download)):
+                    
+                    logger.info(f"TorrentService: YggFlix torrent {raw_title} mal mis en cache, suppression pour retraitement")
+                    await self.torrent_dao.delete_torrent_item(unique_id)
+                    return None
+                
+                return torrent_item
             return None
         except Exception as e:
             self.logger.error(f"Error getting cached torrent: {e}")
@@ -96,6 +108,7 @@ class TorrentService:
     def __process_ygg_api_url(self, result: TorrentItem): 
         if not self.config["yggflix"]:
             logger.error("Yggflix is not enabled in the config. Skipping processing of Yggflix URL.")
+            return result
         try:
             response = self.__session.get(result.link, timeout=10)
             time.sleep(0.1) # Add a delay of 0.1 seconds between requests faire usage for small VPS
@@ -107,7 +120,11 @@ class TorrentService:
             return result
         
         if response.status_code == 200:
-            return self.__process_torrent(result, response.content)
+            # Pour YggFlix, on garde le lien .torrent original pour les trackers privés
+            processed_result = self.__process_torrent(result, response.content)
+            # Conserver le lien .torrent pour AllDebrid
+            processed_result.torrent_download = result.link
+            return processed_result
         elif response.status_code == 422:
             self.logger.info(f"Not aviable torrent on yggflix: {result.file_name}")
         else:
@@ -137,12 +154,38 @@ class TorrentService:
         return result
 
     def __process_torrent(self, result: TorrentItem, torrent_file):
-        metadata = bencode.bdecode(torrent_file)
+        try:
+            metadata = bencode.bdecode(torrent_file)
+        except Exception as e:
+            try:
+                from bencodepy import Decoder
+                decoder = Decoder(encoding='latin-1') 
+                metadata = decoder.decode(torrent_file)
+            except Exception as inner_e:
+                logger.error(f"Impossible de décoder le fichier torrent: {str(e)} puis {str(inner_e)}")
+                result.torrent_download = result.link
+                result.trackers = []
+                result.info_hash = ""
+                result.magnet = ""
+                return result
 
-        result.torrent_download = result.link
-        result.trackers = self.__get_trackers_from_torrent(metadata)
-        result.info_hash = self.__convert_torrent_to_hash(metadata["info"])
-        result.magnet = self.__build_magnet(result.info_hash, metadata["info"]["name"], result.trackers)
+        # Conserver le lien .torrent original si ce n'est pas déjà défini
+        if not result.torrent_download:
+            result.torrent_download = result.link
+        
+        try:
+            result.trackers = self.__get_trackers_from_torrent(metadata)
+            result.info_hash = self.__convert_torrent_to_hash(metadata["info"])
+            
+            # Pour tous les torrents, construire le magnet complet normalement
+            # La distinction AllDebrid vs autres services se fait au niveau debrid
+            result.magnet = self.__build_magnet(result.info_hash, metadata["info"]["name"], result.trackers)
+                
+        except Exception as e:
+            logger.error(f"Erreur lors du traitement des métadonnées du torrent: {str(e)}")
+            result.trackers = []
+            result.info_hash = ""
+            result.magnet = ""
 
         if "files" not in metadata["info"]:
             result.file_index = 1
