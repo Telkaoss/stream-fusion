@@ -4,6 +4,7 @@ from typing import List
 from RTN import title_match
 
 from stream_fusion.utils.filter.language_filter import LanguageFilter
+from stream_fusion.utils.filter.language_priority_filter import LanguagePriorityFilter
 from stream_fusion.utils.filter.max_size_filter import MaxSizeFilter
 from stream_fusion.utils.filter.quality_exclusion_filter import QualityExclusionFilter
 from stream_fusion.utils.filter.title_exclusion_filter import TitleExclusionFilter
@@ -22,16 +23,30 @@ def sort_quality(item: TorrentItem):
     return priority, item.parsed_data.resolution is None
 
 
+def get_indexer_priority_for_sort(indexer):
+    """Fonction pour obtenir la priorité de l'indexer lors du tri"""
+    indexer_priority = {
+        "Yggtorrent": 1,      # "Yggtorrent - API"
+        "DMM": 2,             # "DMM - API"  
+        "Public": 3,          # "Public - Cache"
+        "Sharewood": 4,       # "Sharewood - API"
+        "Jackett": 5,         # Jackett indexers
+    }
+    indexer_name = indexer.split(' ')[0] if indexer and ' ' in indexer else indexer
+    priority = indexer_priority.get(indexer_name, 999)
+    logger.trace(f"Filters: Indexer '{indexer}' -> extracted '{indexer_name}' -> priority {priority}")
+    return priority
+
 def items_sort(items, config):
-    logger.info(f"Filters: Sorting items by method: {config['sort']}")
+    logger.info(f"Filters: Sorting items by method: {config['sort']} (YggFlix priority at equal quality)")
     if config["sort"] == "quality":
-        sorted_items = sorted(items, key=sort_quality)
+        sorted_items = sorted(items, key=lambda x: (sort_quality(x), get_indexer_priority_for_sort(x.indexer)))
     elif config["sort"] == "sizeasc":
-        sorted_items = sorted(items, key=lambda x: int(x.size))
+        sorted_items = sorted(items, key=lambda x: (int(x.size), get_indexer_priority_for_sort(x.indexer)))
     elif config["sort"] == "sizedesc":
-        sorted_items = sorted(items, key=lambda x: int(x.size), reverse=True)
+        sorted_items = sorted(items, key=lambda x: (-int(x.size), get_indexer_priority_for_sort(x.indexer)))
     elif config["sort"] == "qualitythensize":
-        sorted_items = sorted(items, key=lambda x: (sort_quality(x), -int(x.size)))
+        sorted_items = sorted(items, key=lambda x: (sort_quality(x), -int(x.size), get_indexer_priority_for_sort(x.indexer)))
     else:
         logger.warning(
             f"Filters: Unrecognized sort method: {config['sort']}. No sorting applied."
@@ -39,7 +54,7 @@ def items_sort(items, config):
         sorted_items = items
 
     logger.success(
-        f"Filters: Sorting complete. Number of sorted items: {len(sorted_items)}"
+        f"Filters: Sorting complete - Quality first, YggFlix priority at equal quality. Number of sorted items: {len(sorted_items)}"
     )
     return sorted_items
 
@@ -199,6 +214,9 @@ def filter_items(items, media, config):
         "exclusion": QualityExclusionFilter(config),
         # "resultsPerQuality": ResultsPerQualityFilter(config),
     }
+    
+    # Filtre de priorité de langue à appliquer en dernier
+    language_priority_filter = LanguagePriorityFilter(config)
 
     logger.info(f"Filters: Initial item count: {len(items)}")
 
@@ -232,6 +250,34 @@ def filter_items(items, media, config):
                 f"Filters: Error while applying {filter_name} filter", exc_info=e
             )
 
+    # Appliquer le filtre de priorité de langue en dernier pour trier les résultats
+    try:
+        logger.info(f"Filters: Applying language priority filter")
+        items = language_priority_filter(items)
+        logger.success(f"Filters: Items sorted by language priority")
+        
+        # Tri secondaire par qualité au sein de chaque groupe linguistique
+        # Regrouper les torrents par priorité de langue
+        language_groups = {}
+        for item in items:
+            priority = getattr(item, 'language_priority', 999)
+            if priority not in language_groups:
+                language_groups[priority] = []
+            language_groups[priority].append(item)
+        
+        # Trier chaque groupe par qualité et taille selon la méthode de tri configurée
+        sorted_items = []
+        for priority in sorted(language_groups.keys()):
+            group_items = language_groups[priority]
+            # Appliquer le même tri que celui configuré globalement
+            sorted_group = items_sort(group_items, config)
+            sorted_items.extend(sorted_group)
+            
+        items = sorted_items
+        logger.success(f"Filters: Items sorted by language priority and then by quality")
+    except Exception as e:
+        logger.error(f"Filters: Error while applying language priority filter", exc_info=e)
+    
     logger.success(f"Filters: Filtering complete. Final item count: {len(items)}")
     return items
 
@@ -255,8 +301,14 @@ def merge_items(
 
     def add_to_merged(item: TorrentItem):
         key = (item.raw_title, item.size)
-        if key not in merged_dict or item.seeders > merged_dict[key].seeders:
+        if key not in merged_dict:
             merged_dict[key] = item
+        else:
+            existing_priority = get_indexer_priority_for_sort(merged_dict[key].indexer)
+            new_priority = get_indexer_priority_for_sort(item.indexer)
+            
+            if new_priority < existing_priority or (new_priority == existing_priority and item.seeders > merged_dict[key].seeders):
+                merged_dict[key] = item
 
     for item in cache_items:
         add_to_merged(item)
