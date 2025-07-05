@@ -1,6 +1,7 @@
 from itertools import islice
 import uuid
 import tenacity
+import re
 from urllib.parse import unquote
 
 from fastapi import HTTPException
@@ -105,13 +106,9 @@ class Torbox(BaseDebrid):
         
         if existing_torrent:
             logger.info(f"Torbox: Found existing torrent with ID: {existing_torrent['id']}")
-            torrent_info = existing_torrent
-            if not torrent_info or "id" not in torrent_info:
-                logger.error("Torbox: Failed to add or find torrent.")
-                return None
-            torrent_id = torrent_info["id"]
+            torrent_id = existing_torrent["id"]
         else:
-            # Add the magnet or torrent file - privilégier .torrent pour YggFlix
+            # Add the magnet or torrent file
             torrent_info = self.add_magnet_or_torrent(magnet, torrent_download)
             if not torrent_info or "torrent_id" not in torrent_info:
                 logger.error("Torbox: Failed to add or find torrent.")
@@ -125,8 +122,14 @@ class Torbox(BaseDebrid):
             logger.warning("Torbox: Torrent not ready, caching in progress.")
             return settings.no_cache_video_url
 
+        # Always get fresh torrent info with complete file list
+        fresh_torrent_info = self.get_torrent_info(torrent_id)
+        if not fresh_torrent_info or "data" not in fresh_torrent_info:
+            logger.error("Torbox: Failed to get torrent info.")
+            return settings.no_cache_video_url
+            
         # Select the appropriate file
-        file_id = self._select_file(torrent_info, stream_type, file_index, season, episode)
+        file_id = self._select_file(fresh_torrent_info["data"], stream_type, file_index, season, episode)
         
         if file_id == None:
             logger.error("Torbox: No matching file found.")
@@ -179,12 +182,7 @@ class Torbox(BaseDebrid):
         return None
 
     def add_magnet_or_torrent(self, magnet, torrent_download=None, ip=None, privacy="private"):
-        # Pour les trackers privés (YggTorrent), privilégier le fichier .torrent
-        if torrent_download and (settings.yggflix_url and settings.yggflix_url in torrent_download):
-            logger.info("Torbox: Using .torrent file for YggFlix private tracker")
-            torrent_file = self.download_torrent_file(torrent_download)
-            response = self.add_torrent(torrent_file, privacy)
-        elif torrent_download is None:
+        if torrent_download is None:
             logger.info("Torbox: Adding magnet")
             response = self.add_magnet(magnet, ip, privacy)
         else:
@@ -230,10 +228,9 @@ class Torbox(BaseDebrid):
             return largest_file["id"]
         
         elif stream_type == "series":
+            # Always use intelligent selection for series (ignore file_index)
             if file_index is not None:
-                logger.info(f"Torbox: Selected file index {file_index} for series")
-                return file_index
-            
+                logger.debug(f"Torbox: Ignoring file_index {file_index} for series, using intelligent selection")
 
             try:
                 numeric_season = int(season.replace("S", ""))
@@ -242,32 +239,53 @@ class Torbox(BaseDebrid):
                 logger.error(f"Torbox: Invalid season/episode format: {season}/{episode}")
                 return None
             
-            matching_files = [
-                file for file in files
-                if season_episode_in_filename(file["short_name"], numeric_season, numeric_episode) and is_video_file(file["short_name"])
+            matching_files = []
+            logger.debug(f"Torbox: Searching for S{numeric_season:02d}E{numeric_episode:02d} among {len(files)} files")
+            
+            # Pre-compile patterns for better performance
+            episode_patterns = [
+                rf"[Ss]{numeric_season:02d}[Ee]{numeric_episode:02d}",  # S01E01
+                rf"[Ss]{numeric_season}[Ee]{numeric_episode:02d}",      # S1E01
+                rf"{numeric_season:02d}x{numeric_episode:02d}",         # 01x01
+                rf"{numeric_season}x{numeric_episode:02d}",             # 1x01
+                rf"[Ss]eason.{numeric_season:02d}.*[Ee]{numeric_episode:02d}",  # Season 01 Episode 01
+                rf"[Ss]eason.{numeric_season}.*[Ee]{numeric_episode:02d}",      # Season 1 Episode 01
+                rf"[Ss]{numeric_season:02d}.*[Ee]pisode.{numeric_episode:02d}",  # S01 Episode 01
+                rf"[Ss]{numeric_season}.*[Ee]pisode.{numeric_episode:02d}",     # S1 Episode 01
             ]
             
-            if matching_files:
-                largest_matching_file = max(matching_files, key=lambda x: x["size"])
-                logger.info(f"Torbox: Selected largest matching file (ID: {largest_matching_file['id']}, Name: {largest_matching_file['name']}, Size: {largest_matching_file['size']}) for series")
-                return largest_matching_file["id"]
-            else:
-                logger.warning(f"Torbox: No matching files found for S{numeric_season:02d}E{numeric_episode:02d}, trying smart fallback")
-                from stream_fusion.utils.general import smart_episode_fallback
+            for file in files:
+                if not is_video_file(file["short_name"]):
+                    continue
+                    
+                filename = file["short_name"]
+                logger.debug(f"Torbox: Checking file: {filename}")
                 
-                fallback_files = [
-                    {
-                        "name": file["short_name"],
-                        "size": file["size"],
-                        "index": file["id"]  
-                    }
-                    for file in files if is_video_file(file["short_name"])
-                ]
-                
-                fallback_file = smart_episode_fallback(fallback_files, numeric_season, numeric_episode)
-                if fallback_file:
-                    logger.info(f"Torbox: Smart fallback selected file: {fallback_file.get('name')} (ID: {fallback_file.get('index')})")
-                    return fallback_file.get('index')
+                # Test RTN parser first
+                if season_episode_in_filename(filename, numeric_season, numeric_episode):
+                    logger.debug(f"Torbox: ✓ RTN MATCH: {filename}")
+                    matching_files.append(file)
                 else:
-                    logger.error(f"Torbox: Smart fallback also failed for S{numeric_season:02d}E{numeric_episode:02d}")
-                    return None
+                    # Immediate fallback with improved patterns
+                    match_found = False
+                    for pattern in episode_patterns:
+                        if re.search(pattern, filename, re.IGNORECASE):
+                            logger.debug(f"Torbox: ✓ REGEX MATCH with pattern '{pattern}': {filename}")
+                            matching_files.append(file)
+                            match_found = True
+                            break
+                    
+                    if not match_found:
+                        logger.debug(f"Torbox: ✗ NO MATCH: {filename}")
+            
+            if len(matching_files) == 0:
+                logger.warning(f"Torbox: No matching files found for S{numeric_season:02d}E{numeric_episode:02d}")
+                return None
+            
+            largest_matching_file = max(matching_files, key=lambda x: x["size"])
+            logger.info(f"Torbox: Selected {largest_matching_file['short_name']} (ID: {largest_matching_file['id']}) from {len(matching_files)} matches")
+            
+            if len(matching_files) > 1:
+                logger.debug(f"Torbox: Other matches: {[f['short_name'] for f in matching_files if f != largest_matching_file]}")
+            
+            return largest_matching_file["id"]
