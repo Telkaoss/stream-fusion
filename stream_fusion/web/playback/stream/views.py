@@ -331,7 +331,7 @@ async def get_stream_link(
 
 
 @router.get("/{config}/{query}", responses={500: {"model": ErrorResponse}})
-@rate_limiter(limit=20, seconds=60, redis=redis_session)
+@rate_limiter(limit=100, seconds=60, redis=redis_session)
 async def get_playback(
     config: str,
     query: str,
