@@ -7,3 +7,15 @@ class Series(Media):
         self.season = season
         self.episode = episode
         self.seasonfile = None
+
+    def get_season_number(self) -> int:
+        """Extract season number from season string (e.g., 'S02' -> 2)"""
+        if self.season and self.season.startswith('S'):
+            return int(self.season[1:])
+        return 0
+
+    def get_episode_number(self) -> int:
+        """Extract episode number from episode string (e.g., 'E05' -> 5)"""
+        if self.episode and self.episode.startswith('E'):
+            return int(self.episode[1:])
+        return 0

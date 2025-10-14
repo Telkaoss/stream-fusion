@@ -544,7 +544,9 @@ class TorrentSmartContainer:
             return
         file = max(files, key=lambda file: file["size"])
         torrent_item.availability = debrid
-        torrent_item.file_index = file["file_index"]
+        # Only update file_index if it wasn't set to None for intelligent selection
+        if torrent_item.file_index is not None:
+            torrent_item.file_index = file["file_index"]
         torrent_item.file_name = file["title"]
         torrent_item.size = file["size"]
         self.logger.debug(

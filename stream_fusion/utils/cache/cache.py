@@ -19,7 +19,15 @@ def search_public(media):
     cache_search["language"] = cache_search["languages"][0]
     #  Wtf, why do we need to use __dict__ here? And also, why is it stuck when we use media directly?
     response = requests.get(url, json=cache_search)
-    return response.json()
+    try:
+        response.raise_for_status() # Lève une exception pour les codes d'état HTTP d'erreur (4xx ou 5xx)
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Search: Erreur lors de la récupération des résultats du cache public: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Search: Erreur de décodage JSON pour le cache public: {e}. Contenu de la réponse: {response.text[:200]}")
+        return None
 
 
 def cache_public(torrents: List[TorrentItem], media):

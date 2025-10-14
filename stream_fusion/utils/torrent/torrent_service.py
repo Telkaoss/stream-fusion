@@ -258,7 +258,7 @@ class TorrentService:
 
                 if season[0] in parsed_file.seasons and episode[0] in parsed_file.episodes:
                     episode_files.append({
-                        "file_index": file_index,
+                        "file_index": None,  # Let debrid service handle file selection
                         "title": file,
                         "size": files["length"]
                     })
@@ -266,7 +266,9 @@ class TorrentService:
             # Doesn't that need to be indented?
             file_index += 1
 
-        return max(episode_files, key=lambda file: file["size"])
+        if episode_files:
+            return max(episode_files, key=lambda file: file["size"])
+        return None
     
     def __find_full_index(self, file_structure):
         self.logger.debug("Starting to build full index of video files")

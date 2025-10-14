@@ -474,13 +474,16 @@ async def get_results(
 
         if len(filtered_results) < min_results:
             logger.info(
-                f"Search: Insufficient filtered results ({len(filtered_results)}). Performing new search."
+                f"Search: Insufficient filtered results ({len(filtered_results)}). Searching for new torrents to add."
             )
-            await redis_cache.delete(cache_key)
-            unfiltered_results = await get_search_results(media, config)
-            unfiltered_results_dict = [item.to_dict() for item in unfiltered_results]
-            await redis_cache.set(cache_key, unfiltered_results_dict, expiration=settings.redis_expiration)
-            filtered_results = filter_items(unfiltered_results, media, config=config)
+            # Ne pas supprimer le cache, chercher de nouveaux torrents
+            new_results = await get_search_results(media, config)
+            # Fusionner anciens + nouveaux (merge_items déduplique automatiquement)
+            all_results = merge_items(unfiltered_results, new_results)
+            # Mettre à jour le cache avec tous les résultats
+            await redis_cache.set(cache_key, [item.to_dict() for item in all_results], expiration=settings.redis_expiration)
+            # Refiltrer avec tous les résultats
+            filtered_results = filter_items(all_results, media, config=config)
 
         logger.success(
             f"Search: Final number of filtered results: {len(filtered_results)}"

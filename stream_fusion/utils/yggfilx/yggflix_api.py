@@ -11,9 +11,9 @@ class YggflixAPI:
     def __init__(
         self,
         pool_connections=10,
-        pool_maxsize=10,
-        max_retries=3,
-        timeout=10,
+        pool_maxsize=50,
+        max_retries=0,
+        timeout=8,
     ):
         """
         Initialize the YggflixAPI class.

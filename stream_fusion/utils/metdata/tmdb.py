@@ -30,12 +30,16 @@ class TMDB(MetadataProvider):
                         languages=self.config['languages']
                     )
                 else:
+                    tmdb_id = data["tv_results"][0]["id"]
+                    season_num = int(full_id[1])
+                    episode_num = int(full_id[2])
+
                     result = Series(
                         id=id,
-                        tmdb_id = data["tv_results"][0]["id"],
+                        tmdb_id=tmdb_id,
                         titles=[self.replace_weird_characters(data["tv_results"][0]["name"])],
-                        season="S{:02d}".format(int(full_id[1])),
-                        episode="E{:02d}".format(int(full_id[2])),
+                        season="S{:02d}".format(season_num),
+                        episode="E{:02d}".format(episode_num),
                         languages=self.config['languages']
                     )
             else:
