@@ -105,18 +105,26 @@ class Torbox(BaseDebrid):
         
         if existing_torrent:
             logger.info(f"Torbox: Found existing torrent with ID: {existing_torrent['id']}")
-            torrent_info = existing_torrent
-            if not torrent_info or "id" not in torrent_info:
-                logger.error("Torbox: Failed to add or find torrent.")
+            torrent_id = existing_torrent["id"]
+            # Get full torrent info with files
+            torrent_response = self.get_torrent_info(torrent_id)
+            if not torrent_response or "data" not in torrent_response:
+                logger.error("Torbox: Failed to get torrent info.")
                 return None
-            torrent_id = torrent_info["id"]
+            torrent_info = torrent_response["data"]
         else:
             # Add the magnet or torrent file
-            torrent_info = self.add_magnet_or_torrent(magnet, torrent_download)
-            if not torrent_info or "torrent_id" not in torrent_info:
+            add_response = self.add_magnet_or_torrent(magnet, torrent_download)
+            if not add_response or "torrent_id" not in add_response:
                 logger.error("Torbox: Failed to add or find torrent.")
                 return None
-            torrent_id = torrent_info["torrent_id"]
+            torrent_id = add_response["torrent_id"]
+            # Get full torrent info with files
+            torrent_response = self.get_torrent_info(torrent_id)
+            if not torrent_response or "data" not in torrent_response:
+                logger.error("Torbox: Failed to get torrent info.")
+                return None
+            torrent_info = torrent_response["data"]
 
         logger.info(f"Torbox: Working with torrent ID: {torrent_id}")
 
@@ -237,14 +245,27 @@ class Torbox(BaseDebrid):
                 logger.error(f"Torbox: Invalid season/episode format: {season}/{episode}")
                 return None
             
-            matching_files = [
-                file for file in files
-                if season_episode_in_filename(file["short_name"], numeric_season, numeric_episode) and is_video_file(file["short_name"])
-            ]
+            logger.info(f"Torbox: DEBUG - Traitement de {len(files)} fichiers au total")
+            for i, file in enumerate(files):
+                logger.info(f"Torbox: DEBUG - Fichier {i+1}: {file['short_name']} (taille: {file['size']}, is_video: {is_video_file(file['short_name'])})")
+            
+            matching_files = []
+            for file in files:
+                if is_video_file(file["short_name"]):
+                    logger.info(f"Torbox: Vérification fichier vidéo: {file['short_name']}")
+                    if season_episode_in_filename(file["short_name"], numeric_season, numeric_episode):
+                        logger.info(f"Torbox: ✓ Match RTN pour {file['short_name']}")
+                        matching_files.append(file)
+                    else:
+                        logger.info(f"Torbox: ✗ Pas de match RTN pour {file['short_name']}")
+                else:
+                    logger.info(f"Torbox: Fichier ignoré (pas vidéo): {file['short_name']}")
+            
+            logger.info(f"Torbox: {len(matching_files)} fichiers trouvés avec RTN pour S{numeric_season:02d}E{numeric_episode:02d}")
             
             if matching_files:
                 largest_matching_file = max(matching_files, key=lambda x: x["size"])
-                logger.info(f"Torbox: Selected largest matching file (ID: {largest_matching_file['id']}, Name: {largest_matching_file['name']}, Size: {largest_matching_file['size']}) for series")
+                logger.info(f"Torbox: Selected largest matching file (ID: {largest_matching_file['id']}, Name: {largest_matching_file['short_name']}, Size: {largest_matching_file['size']}) for series")
                 return largest_matching_file["id"]
             else:
                 logger.warning(f"Torbox: No matching files found for S{numeric_season:02d}E{numeric_episode:02d}, trying smart fallback")
@@ -259,10 +280,27 @@ class Torbox(BaseDebrid):
                     for file in files if is_video_file(file["short_name"])
                 ]
                 
+                logger.info(f"Torbox: Appel du smart fallback avec {len(fallback_files)} fichiers")
+                for f in fallback_files:
+                    logger.info(f"Torbox: Fichier fallback: {f.get('name')} (taille: {f.get('size')}, ID: {f.get('index')})")
+                
                 fallback_file = smart_episode_fallback(fallback_files, numeric_season, numeric_episode)
                 if fallback_file:
-                    logger.info(f"Torbox: Smart fallback selected file: {fallback_file.get('name')} (ID: {fallback_file.get('index')})")
+                    logger.debug(f"Torbox: Smart fallback a sélectionné: {fallback_file.get('name')} (ID: {fallback_file.get('index')})")
                     return fallback_file.get('index')
                 else:
-                    logger.error(f"Torbox: Smart fallback also failed for S{numeric_season:02d}E{numeric_episode:02d}")
-                    return None
+                    logger.debug("Torbox: Smart fallback n'a rien trouvé, essai du fallback final pour fichier unique")
+                    # Final fallback: for single-file torrents, just take the only video file
+                    video_files = [f for f in files if is_video_file(f["short_name"])]
+                    logger.debug(f"Torbox: DEBUG - Trouvé {len(video_files)} fichiers vidéo dans le fallback final")
+                    for vf in video_files:
+                        logger.debug(f"Torbox: DEBUG - Fichier vidéo: {vf['short_name']} (ID: {vf['id']})")
+                    
+                    if len(video_files) == 1:
+                        single_file = video_files[0]
+                        logger.info(f"Torbox: Fichier vidéo unique détecté, utilisation: {single_file['short_name']} (ID: {single_file['id']})")
+                        return single_file["id"]
+                    else:
+                        logger.error(f"Torbox: Le fallback intelligent a aussi échoué pour S{numeric_season:02d}E{numeric_episode:02d}")
+                        logger.error(f"Torbox: Trouvé {len(video_files)} fichiers vidéo, attendu exactement 1 pour le fallback fichier unique")
+                        return None
