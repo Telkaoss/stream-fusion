@@ -372,7 +372,6 @@ class TorrentSmartContainer:
                     is_available = status.get("transcoded", False)
                     item.availability = "PM" if is_available else None
                     
-                    # Mettre à jour les détails du fichier si disponible
                     if is_available:
                         if item.type == "series":
                             # Pour les séries, vérifier si le fichier sélectionné correspond à l'épisode
@@ -544,7 +543,9 @@ class TorrentSmartContainer:
             return
         file = max(files, key=lambda file: file["size"])
         torrent_item.availability = debrid
-        torrent_item.file_index = file["file_index"]
+        # Only update file_index if it wasn't set to None for intelligent selection
+        if torrent_item.file_index is not None:
+            torrent_item.file_index = file["file_index"]
         torrent_item.file_name = file["title"]
         torrent_item.size = file["size"]
         self.logger.debug(
