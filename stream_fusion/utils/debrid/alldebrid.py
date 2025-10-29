@@ -10,6 +10,41 @@ from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
 
 
+def flatten_files(files, result=None):
+    """
+    Flattens the nested file structure from AllDebrid API.
+    Recursively extracts files from nested directories (e field).
+
+    Similar to stremthru's getFlatFiles() function.
+
+    Args:
+        files: List of file objects with optional 'e' (children) field
+        result: Accumulator list for recursion
+
+    Returns:
+        Flattened list of all files
+    """
+    if result is None:
+        result = []
+
+    if not isinstance(files, list):
+        return result
+
+    for file_item in files:
+        if not isinstance(file_item, dict):
+            continue
+
+        # Add the current file
+        result.append(file_item)
+
+        # Recursively add children if they exist
+        children = file_item.get("e", [])
+        if children and isinstance(children, list):
+            flatten_files(children, result)
+
+    return result
+
+
 class AllDebrid(BaseDebrid):
     def __init__(self, config):
         super().__init__(config)
@@ -79,14 +114,16 @@ class AllDebrid(BaseDebrid):
         magnet_data = magnets[0]
         files = magnet_data.get("files", [])
 
+        # Flatten nested file structure (handles directories with children)
+        files = flatten_files(files)
+        logger.info(f"AllDebrid: All files in torrent (flattened): {[f.get('n', '') for f in files]}")
+
         link = settings.no_cache_video_url
         if stream_type == "movie":
             logger.info("AllDebrid: Getting link for movie")
             try:
-                if isinstance(files, list):
-                    link = max(files, key=lambda x: x.get('s', 0))['l']
-                else:
-                    link = max(files.values(), key=lambda x: x.get('s', 0))['l']
+                # Files are now all flattened (leaf nodes only)
+                link = max(files, key=lambda x: x.get('s', 0))['l']
             except Exception as e:
                 logger.error(f"AllDebrid: Error getting movie link: {str(e)}")
         elif stream_type == "series":
@@ -96,12 +133,8 @@ class AllDebrid(BaseDebrid):
 
             matching_files = []
             try:
-                if isinstance(files, list):
-                    files_iter = files
-                else:
-                    files_iter = files.values()
-
-                for file_item in files_iter:
+                # Files are already flattened, no need to check list vs dict
+                for file_item in files:
                     filename = file_item.get("n", "") if isinstance(file_item, dict) else ""
                     logger.debug(f"AllDebrid: Checking file: {filename}")
 
@@ -132,11 +165,10 @@ class AllDebrid(BaseDebrid):
                         if not match_found:
                             logger.debug(f"AllDebrid: ✗ No match: {filename}")
 
-                if len(matching_files) == 0:
-                    logger.warning(f"AllDebrid: No matching files found for S{numeric_season:02d}E{numeric_episode:02d}")
-                    return settings.no_cache_video_url
-                else:
+                if matching_files:
                     link = max(matching_files, key=lambda x: x.get("s", 0))["l"]
+                else:
+                    logger.warning(f"AllDebrid: No matching files found for S{numeric_season:02d}E{numeric_episode:02d}")
             except Exception as e:
                 logger.error(f"AllDebrid: Error processing series: {str(e)}")
         else:
