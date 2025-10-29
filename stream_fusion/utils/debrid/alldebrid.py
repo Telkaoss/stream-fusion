@@ -40,9 +40,11 @@ class AllDebrid(BaseDebrid):
         files = {"files[]": (str(uuid.uuid4()) + ".torrent", torrent_file, 'application/x-bittorrent')}
         return self.json_response(url, method='post', headers=self.get_headers(), files=files)
 
-    def check_magnet_status(self, id, ip=None):
-        url = f"{self.base_url}magnet/status?agent={self.agent}&id={id}"
-        return self.json_response(url, method='get', headers=self.get_headers())
+    def get_magnet_files(self, id, ip=None):
+        """Get files from magnet using v4 API"""
+        url = f"{settings.ad_base_url}/v4/magnet/files"
+        data = {"id[]": id, "agent": self.agent}
+        return self.json_response(url, method='post', headers=self.get_headers(), data=data)
 
     def unrestrict_link(self, link, ip=None):
         url = f"{self.base_url}link/unlock?agent={self.agent}&link={link}"
@@ -54,64 +56,89 @@ class AllDebrid(BaseDebrid):
         torrent_download = unquote(query["torrent_download"]) if query["torrent_download"] is not None else None
 
         torrent_id = self.add_magnet_or_torrent(magnet, torrent_download, ip)
+        torrent_id = str(torrent_id) if torrent_id else ""
         logger.info(f"AllDebrid: Torrent ID: {torrent_id}")
 
-        if not self.wait_for_ready_status(
-                lambda: self.check_magnet_status(torrent_id, ip)["data"]["magnets"]["status"] == "Ready"):
-            logger.error("AllDebrid: Torrent not ready, caching in progress.")
+        if not torrent_id or torrent_id.startswith("Error"):
+            logger.error(f"AllDebrid: Failed to add torrent: {torrent_id}")
             return settings.no_cache_video_url
-        logger.info("AllDebrid: Torrent is ready.")
 
         logger.info(f"AllDebrid: Retrieving data for torrent ID: {torrent_id}")
-        data = self.check_magnet_status(torrent_id, ip)["data"]
+        files_response = self.get_magnet_files(torrent_id, ip)
         logger.info(f"AllDebrid: Data retrieved for torrent ID")
+
+        if not files_response or files_response.get("status") != "success":
+            logger.error("AllDebrid: Failed to get files")
+            return settings.no_cache_video_url
+
+        magnets = files_response["data"].get("magnets", [])
+        if not magnets:
+            logger.error("AllDebrid: No magnets in response")
+            return settings.no_cache_video_url
+
+        magnet_data = magnets[0]
+        files = magnet_data.get("files", [])
 
         link = settings.no_cache_video_url
         if stream_type == "movie":
             logger.info("AllDebrid: Getting link for movie")
-            link = max(data["magnets"]['links'], key=lambda x: x['size'])['link']
+            try:
+                if isinstance(files, list):
+                    link = max(files, key=lambda x: x.get('s', 0))['l']
+                else:
+                    link = max(files.values(), key=lambda x: x.get('s', 0))['l']
+            except Exception as e:
+                logger.error(f"AllDebrid: Error getting movie link: {str(e)}")
         elif stream_type == "series":
             numeric_season = int(query['season'].replace("S", ""))
             numeric_episode = int(query['episode'].replace("E", ""))
             logger.info(f"AllDebrid: Getting link for series S{numeric_season:02d}E{numeric_episode:02d}")
 
             matching_files = []
-            for file in data["magnets"]["links"]:
-                filename = file["filename"]
-                logger.debug(f"AllDebrid: Checking file: {filename}")
-                
-                if season_episode_in_filename(filename, numeric_season, numeric_episode):
-                    logger.debug(f"AllDebrid: ✓ Match found with RTN parser: {filename}")
-                    matching_files.append(file)
+            try:
+                if isinstance(files, list):
+                    files_iter = files
                 else:
-                    import re
-                    episode_patterns = [
-                        rf"[Ss]{numeric_season:02d}[Ee]{numeric_episode:02d}",  
-                        rf"[Ss]{numeric_season}[Ee]{numeric_episode:02d}",      
-                        rf"{numeric_season:02d}x{numeric_episode:02d}",         
-                        rf"{numeric_season}x{numeric_episode:02d}",             
-                        rf"[Ss]eason.{numeric_season:02d}.*[Ee]{numeric_episode:02d}",  
-                        rf"[Ss]eason.{numeric_season}.*[Ee]{numeric_episode:02d}",      
-                        rf"[Ss]{numeric_season:02d}.*[Ee]pisode.{numeric_episode:02d}",  
-                        rf"[Ss]{numeric_season}.*[Ee]pisode.{numeric_episode:02d}",     
-                    ]
-                    
-                    match_found = False
-                    for pattern in episode_patterns:
-                        if re.search(pattern, filename, re.IGNORECASE):
-                            logger.debug(f"AllDebrid: ✓ Match found with improved pattern '{pattern}': {filename}")
-                            matching_files.append(file)
-                            match_found = True
-                            break
-                    
-                    if not match_found:
-                        logger.debug(f"AllDebrid: ✗ No match: {filename}")
+                    files_iter = files.values()
 
-            if len(matching_files) == 0:
-                logger.warning(f"AllDebrid: No matching files found for S{numeric_season:02d}E{numeric_episode:02d}")
-                return settings.no_cache_video_url
-            else:
-                link = max(matching_files, key=lambda x: x["size"])["link"]
+                for file_item in files_iter:
+                    filename = file_item.get("n", "") if isinstance(file_item, dict) else ""
+                    logger.debug(f"AllDebrid: Checking file: {filename}")
+
+                    if season_episode_in_filename(filename, numeric_season, numeric_episode):
+                        logger.debug(f"AllDebrid: ✓ Match found with RTN parser: {filename}")
+                        matching_files.append(file_item)
+                    else:
+                        import re
+                        episode_patterns = [
+                            rf"[Ss]{numeric_season:02d}[Ee]{numeric_episode:02d}",
+                            rf"[Ss]{numeric_season}[Ee]{numeric_episode:02d}",
+                            rf"{numeric_season:02d}x{numeric_episode:02d}",
+                            rf"{numeric_season}x{numeric_episode:02d}",
+                            rf"[Ss]eason.{numeric_season:02d}.*[Ee]{numeric_episode:02d}",
+                            rf"[Ss]eason.{numeric_season}.*[Ee]{numeric_episode:02d}",
+                            rf"[Ss]{numeric_season:02d}.*[Ee]pisode.{numeric_episode:02d}",
+                            rf"[Ss]{numeric_season}.*[Ee]pisode.{numeric_episode:02d}",
+                        ]
+
+                        match_found = False
+                        for pattern in episode_patterns:
+                            if re.search(pattern, filename, re.IGNORECASE):
+                                logger.debug(f"AllDebrid: ✓ Match found with improved pattern '{pattern}': {filename}")
+                                matching_files.append(file_item)
+                                match_found = True
+                                break
+
+                        if not match_found:
+                            logger.debug(f"AllDebrid: ✗ No match: {filename}")
+
+                if len(matching_files) == 0:
+                    logger.warning(f"AllDebrid: No matching files found for S{numeric_season:02d}E{numeric_episode:02d}")
+                    return settings.no_cache_video_url
+                else:
+                    link = max(matching_files, key=lambda x: x.get("s", 0))["l"]
+            except Exception as e:
+                logger.error(f"AllDebrid: Error processing series: {str(e)}")
         else:
             logger.error("AllDebrid: Unsupported stream type.")
             raise HTTPException(status_code=500, detail="Unsupported stream type.")
@@ -122,15 +149,15 @@ class AllDebrid(BaseDebrid):
 
         logger.info(f"AllDebrid: Retrieved link: {link}")
 
-        unlocked_link_data = self.unrestrict_link(link, ip)
+        try:
+            unlocked_link_data = self.unrestrict_link(link, ip)
+            if unlocked_link_data and unlocked_link_data.get("status") == "success":
+                logger.info(f"AllDebrid: Unrestricted link")
+                return unlocked_link_data["data"]["link"]
+        except Exception as e:
+            logger.debug(f"AllDebrid: Could not unrestrict link: {str(e)}")
 
-        if not unlocked_link_data:
-            logger.error("AllDebrid: Failed to unlock link.")
-            raise HTTPException(status_code=500, detail="Failed to unlock link in AllDebrid.")
-
-        logger.info(f"AllDebrid: Unrestricted link: {unlocked_link_data['data']['link']}")
-
-        return unlocked_link_data["data"]["link"]
+        return link
 
     def get_availability_bulk(self, hashes_or_magnets, ip=None):
         if len(hashes_or_magnets) == 0:
